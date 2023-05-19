@@ -1,0 +1,80 @@
+service: rwp-webhook
+
+package:
+  individually: true
+
+plugins:
+  - serverless-bundle
+  - serverless-iam-roles-per-function
+  - serverless-disable-request-validators
+  - serverless-reqvalidator-plugin
+
+custom:
+  bundle:
+    aliases:
+      - '@': ../../lib/
+    forceExclude:
+      - '@aws-sdk/client-apigatewaymanagementapi'
+      - '@aws-sdk/client-dynamodb'
+      - '@aws-sdk/client-sns'
+      - '@aws-sdk/util-dynamodb'
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  stage: ${opt:stage, 'prod'}
+  profile: aurdalgroup-${self:provider.stage}
+  region: ${opt:region, 'eu-west-1'}
+  logRetentionInDays: 14
+  # Link to existing API GW
+  apiGateway:
+    restApiId: !Ref ApiGatewayRestApi
+    restApiRootResourceId: !GetAtt ApiGatewayRestApi.RootResourceId
+
+functions:
+  webhook:
+    handler: webhook.main
+    name: rwp-${self:provider.stage}-webhook-webhook
+    timeout: 30
+    environment:
+      WEBSOCKETS_TOPIC_ARN: !ImportValue WebsocketsTopicArn
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - sns:Publish
+        Resource: !ImportValue WebsocketsTopicArn
+    events:
+      - http:
+          path: webhook
+          method: post
+          cors: true
+
+resources:
+  Resources:
+    # Define REST API GW
+    ApiGatewayRestApi:
+      Type: AWS::ApiGateway::RestApi
+      Properties:
+        Name: rwp-${self:provider.stage}-webhook-rest
+        Description: REST API.
+
+    4XXGatewayResponse:
+      Type: AWS::ApiGateway::GatewayResponse
+      Properties:
+        ResponseType: DEFAULT_4XX
+        RestApiId: !Ref ApiGatewayRestApi
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+        ResponseTemplates:
+          application/json: '{"error":$context.error.messageString}'
+
+  Outputs:
+    ApiGatewayRestApiId:
+      Value: !Ref ApiGatewayRestApi
+      Export:
+        Name: ApiGatewayRestApiId
+    ApiGatewayRestApiRootResourceId:
+      Value: !GetAtt ApiGatewayRestApi.RootResourceId
+      Export:
+        Name: ApiGatewayRestApiRootResourceId

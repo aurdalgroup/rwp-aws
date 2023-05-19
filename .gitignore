@@ -1,0 +1,32 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Dependency directories
+node_modules
+jspm_packages
+
+# Optional npm cache directory
+.npm
+
+# Optional REPL history
+.node_repl_history
+
+# vim
+.*.sw*
+Session.vim
+
+# Serverless
+.webpack
+.serverless
+.webpackCache
+
+# env
+env.yml
+.env
+
+# Jetbrains IDEs
+.idea
+
+.DS_Store

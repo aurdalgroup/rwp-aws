@@ -1,0 +1,150 @@
+service: rwp-ws
+
+package:
+  individually: true
+
+plugins:
+  - serverless-bundle
+  - serverless-iam-roles-per-function
+  - serverless-disable-request-validators
+  - serverless-reqvalidator-plugin
+
+custom:
+  bundle:
+    aliases:
+      - '@': ../../lib/
+    forceExclude:
+      - '@aws-sdk/client-apigatewaymanagementapi'
+      - '@aws-sdk/client-dynamodb'
+      - '@aws-sdk/client-sns'
+      - '@aws-sdk/util-dynamodb'
+
+  # Table names
+  tableWebsocketsName: rwp-${self:provider.stage}-ws-websockets-table
+  tableThroughput: 3
+
+  # SNS Topic names
+  snsTopicWebsocketsName: rwp-${self:provider.stage}-ws-websockets-topic
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  stage: ${opt:stage, 'prod'}
+  profile: aurdalgroup-${self:provider.stage}
+  region: ${opt:region, 'eu-west-1'}
+  logRetentionInDays: 14
+
+functions:
+  auth:
+    handler: ws.auth
+    name: rwp-${self:provider.stage}-ws-auth
+  route:
+    handler: ws.route
+    name: rwp-${self:provider.stage}-ws-route
+    environment:
+      WEBSOCKETS_TABLE_NAME: ${self:custom.tableWebsocketsName}
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:PutItem
+          - dynamodb:DeleteItem
+        Resource: !Join ['', [!GetAtt WebsocketsTable.Arn, '*']]
+    events:
+      - websocket:
+          route: $connect
+          authorizer:
+            name: auth
+            identitySource:
+              - 'route.request.querystring.key'
+      - websocket:
+          route: $disconnect
+  postToConnection:
+    handler: postToConnection.main
+    name: rwp-${self:provider.stage}-ws-post-to-connection
+    environment:
+      WEBSOCKETS_TABLE_NAME: ${self:custom.tableWebsocketsName}
+      WEBSOCKETS_API_ENDPOINT: !Join ['', [!GetAtt WebsocketsApi.ApiEndpoint, '/prod']]
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Query
+        Resource: !Join ['', [!GetAtt WebsocketsTable.Arn, '*']]
+      - Effect: Allow
+        Action:
+          - execute-api:ManageConnections
+        Resource:
+          - 'arn:aws:execute-api:*:*:**/@connections/*'
+    events:
+      - sns:
+          arn: !Ref WebsocketsTopic
+          topicName: ${self:custom.snsTopicWebsocketsName}
+          displayName: Websockets Topic
+
+resources:
+  Resources:
+    # Webstockets table
+    WebsocketsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.tableWebsocketsName}
+        # Server-side encryption
+        SSESpecification:
+          SSEEnabled: false
+        TimeToLiveSpecification:
+          AttributeName: ttl
+          Enabled: true
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+          - AttributeName: key
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: ByKey
+            KeySchema:
+              - AttributeName: key
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+
+    # Define WS API GW
+    WebsocketsApi:
+      Type: AWS::ApiGatewayV2::Api
+      Properties:
+        Name: rwp-${self:provider.stage}-ws-websocket
+        Description: WEBSOCKET API.
+        ProtocolType: WEBSOCKET
+        RouteSelectionExpression: $request.body.action
+
+    # Define SNS Topic used by postToConnection
+    WebsocketsTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: ${self:custom.snsTopicWebsocketsName}
+        DisplayName: Websockets Topic
+
+  Outputs:
+    WebsocketsTableName:
+      Value: ${self:custom.tableWebsocketsName}
+      Export:
+        Name: WebsocketsTableName
+    WebsocketsTableArn:
+      Value: !GetAtt WebsocketsTable.Arn
+      Export:
+        Name: WebsocketsTableArn
+
+    WebsocketsApiId:
+      Value: !Ref WebsocketsApi
+      Export:
+        Name: WebsocketsApiId
+    WebsocketsApiEndpoint:
+      Value: !GetAtt WebsocketsApi.ApiEndpoint
+      Export:
+        Name: WebsocketsApiEndpoint
+    WebsocketsTopicArn:
+      Value: !Ref WebsocketsTopic
+      Export:
+        Name: WebsocketsTopicArn
