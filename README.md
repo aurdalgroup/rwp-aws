@@ -2,6 +2,8 @@
 
 A proxy in the middle will receive HTTP webhooks from a running Replicate model and relay them via Websockets to the client application.
 
+### [Client: replicate-webhook-proxy](https://github.com/Pwntus/replicate-webhook-proxy)
+
 ![How it works.](./demo.jpg)
 
 ## How to deploy
